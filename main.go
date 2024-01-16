@@ -1,85 +1,102 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/sqlite"
+	"log"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 type User struct {
-	gorm.Model
-	Name string
+	ID       uint   `gorm:"primaryKey"`
+	Username string `gorm:"unique"`
+	Email    string
 }
 
-var db *gorm.DB
+func connectToMariaDB() (*gorm.DB, error) {
+	dsn := "root:@tcp(localhost:3306)/GoProject?charset=utf8mb4&parseTime=True&loc=Local"
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
 
 func main() {
-	var err error
-	db, err = gorm.Open("sqlite3", "./mydb.sqlite")
+	db, err := connectToMariaDB()
 	if err != nil {
-		panic("failed to connect database")
+		log.Fatal(err)
 	}
-	defer db.Close()
+	//defer db.Close()
 
-	db.AutoMigrate(&User{})
+	// Perform database migration
+	err = db.AutoMigrate(&User{})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	r := gin.Default()
+	// Create a user
+	newUser := &User{Username: "john_doe", Email: "john.doe@example.com"}
+	err = createUser(db, newUser)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Created User:", newUser)
 
-	r.GET("/users", GetUsers)
-	r.POST("/users", CreateUser)
-	r.PUT("/users/:id", UpdateUser)
-	r.DELETE("/users/:id", DeleteUser)
+	// Query user by ID
+	userID := newUser.ID
+	user, err := getUserByID(db, userID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("User by ID:", user)
 
-	r.Run(":5000")
+	// Update user
+	user.Email = "updated_email@example.com"
+	err = updateUser(db, user)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Updated User:", user)
+
+	// Delete user
+	err = deleteUser(db, user)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Deleted User:", user)
 }
 
-func GetUsers(c *gin.Context) {
-	var users []User
-	if err := db.Find(&users).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Error retrieving users"})
-		return
+func createUser(db *gorm.DB, user *User) error {
+	result := db.Create(user)
+	if result.Error != nil {
+		return result.Error
 	}
-	c.JSON(200, users)
+	return nil
 }
 
-func CreateUser(c *gin.Context) {
+func getUserByID(db *gorm.DB, userID uint) (*User, error) {
 	var user User
-	c.BindJSON(&user)
-
-	if err := db.Create(&user).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Error creating user"})
-		return
+	result := db.First(&user, userID)
+	if result.Error != nil {
+		return nil, result.Error
 	}
-	c.JSON(200, user)
+	return &user, nil
 }
 
-func UpdateUser(c *gin.Context) {
-	id := c.Param("id")
-	var user User
-
-	db.First(&user, id)
-	if user.ID == 0 {
-		c.JSON(404, gin.H{"error": "User not found"})
-		return
+func updateUser(db *gorm.DB, user *User) error {
+	result := db.Save(user)
+	if result.Error != nil {
+		return result.Error
 	}
-
-	c.BindJSON(&user)
-	db.Save(&user)
-
-	c.JSON(200, user)
+	return nil
 }
 
-func DeleteUser(c *gin.Context) {
-	id := c.Param("id")
-	var user User
-
-	db.First(&user, id)
-	if user.ID == 0 {
-		c.JSON(404, gin.H{"error": "User not found"})
-		return
+func deleteUser(db *gorm.DB, user *User) error {
+	result := db.Delete(user)
+	if result.Error != nil {
+		return result.Error
 	}
-
-	db.Delete(&user)
-
-	c.JSON(200, gin.H{"success": "User deleted"})
+	return nil
 }
